@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sampleboy usage analytics</title>
+  <style>
+    :root { color-scheme: dark; font: 15px/1.5 system-ui, sans-serif; background: #111316; color: #f1f0ed; }
+    body { margin: 0 auto; padding: 32px 20px 64px; max-width: 1080px; }
+    h1 { margin: 0; font-size: 28px; } h2 { font-size: 18px; margin: 30px 0 12px; }
+    p, small { color: #a3a7b1; } header { display: flex; justify-content: space-between; align-items: center; gap: 20px; border-bottom: 1px solid #30343a; padding-bottom: 20px; }
+    form { display: grid; grid-template-columns: minmax(210px,1fr) minmax(210px,1fr) auto; gap: 8px; width: min(100%,680px); }
+    input, button { min-width: 0; font: inherit; color: inherit; border: 1px solid #454a54; border-radius: 8px; background: #202328; padding: 9px 12px; }
+    button { cursor: pointer; background: #343942; } button:hover { border-color: #80c6d0; }
+    #status { min-height: 24px; color: #f2a08c; } #status[data-error="false"] { color: #8ed49c; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit,minmax(145px,1fr)); gap: 10px; }
+    .card, section { background: #191c20; border: 1px solid #30343a; border-radius: 12px; padding: 16px; }
+    .card strong { display: block; font-size: 26px; } .card span { color: #a3a7b1; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; } th, td { text-align: left; padding: 9px 6px; border-bottom: 1px solid #30343a; }
+    th { color: #a3a7b1; font-weight: 500; } .bars { display: flex; align-items: end; gap: 5px; min-height: 100px; }
+    .bar { flex: 1; min-width: 4px; background: #79c9d3; border-radius: 3px 3px 0 0; position: relative; }
+    .bar:hover::after { content: attr(title); position: absolute; bottom: calc(100% + 5px); left: 50%; transform: translateX(-50%); white-space: nowrap; background: #30343a; padding: 3px 6px; border-radius: 4px; font-size: 12px; }
+    [hidden] { display: none !important; } nav { margin-top: 24px; } a { color: #8bcbd3; }
+    @media (max-width: 800px) { header { align-items: start; flex-direction: column; } form { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div><h1>Sampleboy usage analytics</h1><small>First-party, opt-in events · last 30 days</small></div>
+    <form id="login">
+      <input id="api" type="url" inputmode="url" placeholder="https://your-worker.workers.dev" aria-label="Analytics API origin" required>
+      <input id="token" type="password" autocomplete="off" placeholder="Dashboard access token" aria-label="Dashboard access token" required>
+      <button>Load</button>
+    </form>
+  </header>
+  <p id="status" role="status" data-error="false">Enter the Worker URL and dashboard token to load private statistics.</p>
+  <main id="dashboard" hidden>
+    <div id="cards" class="cards"></div>
+    <h2>Daily activity</h2><section><div id="chart" class="bars" aria-label="Daily active installs"></div></section>
+    <h2>Chop events</h2><section><table><thead><tr><th>Event</th><th>Actions</th><th>Installs</th></tr></thead><tbody id="events"></tbody></table></section>
+    <p>"Chops created" counts new tabs and joined or duplicated results; the two starter tabs count when first recorded. "Chops with recordings" is the unique number that have a saved pad performance. "Pad record actions" includes overdubs. Completed chain or ZIP exports count each included chop.</p>
+    <p>Only users who enabled analytics are included. Audio, track names, source URLs and pad names are not collected. The hosting provider receives network request metadata; the event database does not store IP addresses.</p>
+  </main>
+  <nav><a href="https://vladimirya.github.io/audio-recorder-sample-slicer-pp/">Privacy policy</a></nav>
+  <script type="module">
+    const form = document.querySelector('#login');
+    const status = document.querySelector('#status');
+    const dashboard = document.querySelector('#dashboard');
+    const say = (message, error = false) => { status.textContent = message; status.dataset.error = String(!error); };
+    const number = value => new Intl.NumberFormat().format(Number(value || 0));
+    const card = (label, value) => { const div = document.createElement('div'); div.className = 'card'; const strong = document.createElement('strong'); strong.textContent = number(value); const span = document.createElement('span'); span.textContent = label; div.append(strong, span); return div; };
+    async function load(api, token) {
+      say('Loading…'); dashboard.hidden = true;
+      try {
+        const url = new URL(api);
+        if (url.protocol !== 'https:' || url.pathname !== '/' || url.search || url.hash) throw new Error('Enter the HTTPS Worker origin, without a path.');
+        const response = await fetch(url.origin + '/api/stats?days=30', { headers: { Authorization: 'Bearer ' + token }, cache: 'no-store', credentials: 'omit' });
+        if (!response.ok) throw new Error(response.status === 401 ? 'Access denied. Check the dashboard token.' : 'Could not load statistics (' + response.status + ').');
+        const data = await response.json();
+        document.querySelector('#cards').replaceChildren(
+          card('Active installs', data.summary.active_installs), card('Popup opens', data.summary.popup_opens),
+          card('Chops created', data.summary.chops_created), card('Pad record actions', data.summary.pad_record_actions),
+          card('Chops with recordings', data.summary.chops_recorded), card('Chop download actions', data.summary.chop_download_actions),
+          card('Chops downloaded', data.summary.chops_downloaded), card('Analytics opt-ins', data.summary.opt_ins));
+        const days = data.daily || [];
+        const max = Math.max(1, ...days.map(row => Number(row.active_installs)));
+        document.querySelector('#chart').replaceChildren(...days.map(row => { const bar = document.createElement('div'); bar.className = 'bar'; bar.style.height = Math.max(2, 96 * Number(row.active_installs) / max) + 'px'; bar.title = row.day + ': ' + number(row.active_installs) + ' installs'; return bar; }));
+        document.querySelector('#events').replaceChildren(...(data.events || []).map(row => { const tr = document.createElement('tr'); for (const value of [row.event_name, number(row.actions), number(row.installs)]) { const td = document.createElement('td'); td.textContent = value; tr.append(td); } return tr; }));
+        dashboard.hidden = false; say('Loaded. The token is used only for this request and is not saved.');
+      } catch (error) { say(error instanceof Error ? error.message : 'Could not load statistics.', true); }
+    }
+    form.addEventListener('submit', event => { event.preventDefault(); void load(document.querySelector('#api').value.trim(), document.querySelector('#token').value.trim()); });
+  </script>
+</body>
+</html>
